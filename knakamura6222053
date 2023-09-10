@@ -1,0 +1,41 @@
+#!/bin/bash
+
+set -o errexit
+set -o nounset 
+set -x
+
+module load samtools
+
+# Path and condition setting
+patient_bam=${sample}.bam
+control_bams=("${control1}.bam" "${control2}.bam" "${control3}.bam")
+region="chr3:128877490-128915114"
+output_file=${sample}_output.txt
+
+# Writes headers to output file
+echo -e "chr\tposition\t${sample}\t${control1}\t${control2}\t${control3}" > $output_file
+
+# Write coverage for each position in the output file
+samtools depth -a -r $region $patient_bam | while IFS=$'\t' read -r chr position coverage_patient; do
+    control_coverages=""
+    for control_bam in "${control_bams[@]}"; do
+        coverage_control=$(samtools depth -a -r $region $control_bam | awk -v pos=$position '$2 == pos { print $3; exit }')
+        control_coverages="$control_coverages\t$coverage_control"
+    done
+
+    # Calculate average coverage of control group
+    sum_control_coverage=0
+    for control_bam in "${control_bams[@]}"; do
+        control_coverage=$(samtools depth -a -r $region $control_bam | awk -v pos=$position '$2 == pos { print $3; exit }')
+        sum_control_coverage=$((sum_control_coverage + control_coverage))
+    done
+    avg_control_coverage=$((sum_control_coverage / ${#control_bams[@]}))
+
+    # If the coverage of SAMPLE is greater than 100 than the average of the CONTROL group, write to the output file
+    if [ $((coverage_patient - avg_control_coverage)) -ge 100 ]; then
+        echo -e "${chr}\t${position}\t${coverage_patient}${control_coverages}" >> $output_file
+    fi
+done
+
+echo "Output saved in $output_file"
+
